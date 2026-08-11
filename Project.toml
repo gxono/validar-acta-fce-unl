@@ -1,0 +1,14 @@
+name = "ValidarActa"
+uuid = "89f24400-8196-48c7-b748-04b44509517c"
+version = "0.1.0"
+authors = ["Jonatan Perren <jonatan.perren@gmail.com>"]
+
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+PDFIO = "4d0d745f-9d9a-592e-8d18-1ad8a0f42b92"
+XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
+
+[compat]
+DataFrames = "1.8.2"
+PDFIO = "0.1.15"
+XLSX = "0.12.2"

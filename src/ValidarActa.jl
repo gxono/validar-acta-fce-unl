@@ -233,7 +233,7 @@ donde `resumen` tiene una fila por acta con la cantidad de páginas y de
 estudiantes capturados, para poder verificar de un vistazo que se leyó todo.
 """
 function procesar_actas(carpeta_actas::AbstractString)
-    lista_pdf = filter(endswith(".pdf"), readdir(carpeta_actas))
+    lista_pdf = filter(f -> endswith(lowercase(f), ".pdf"), readdir(carpeta_actas))
 
     resumen = DataFrame(archivo = String[], paginas = Int[], estudiantes = Int[])
 
@@ -282,7 +282,14 @@ Lee todas las hojas de todos los `.xlsx` de `directorio`. Devuelve una tupla
 libro, indicando si se incluyó (tenía columnas "legajo" y "nota") o no y por qué.
 """
 function procesar_xlsx(directorio::AbstractString)
-    archivos = readdir(directorio) |> vf -> filter(contains(r"^[^~\\].*\.xlsx$"), vf)
+    todos_archivos = readdir(directorio)
+    archivos = filter(contains(r"^[^~].*\.xlsx$"i), todos_archivos)
+
+    # Archivos que parecen planillas de Excel pero en un formato que no leemos
+    # (solo soportamos .xlsx): avisar en vez de ignorarlos en silencio.
+    for archivo in filter(contains(r"^[^~].*\.(xls|xlsm)$"i), todos_archivos)
+        @warn "El archivo \"$archivo\" no se puede leer (solo se soporta .xlsx). Convertilo a .xlsx y volvé a intentar."
+    end
 
     tablas = DataFrame[]
     resumen = DataFrame(archivo = String[], hoja = String[], incluida = Bool[], estudiantes = Int[], motivo = String[])
@@ -305,6 +312,11 @@ function procesar_xlsx(directorio::AbstractString)
             tabla.hoja_fila = axes(tabla, 1) .+ 1
 
             tabla = select(tabla, :legajo, :nota, :hoja_fila)
+
+            # Excel suele "extender" el rango de la hoja más allá de los datos reales:
+            # descartamos filas en blanco (sin legajo) para no tratarlas como estudiantes.
+            tabla = tabla[.!ismissing.(tabla.legajo) .& (strip.(string.(tabla.legajo)) .!= ""), :]
+
             tabla.hoja_archivo .= archivo
             tabla.hoja_nombre .= nombre_hoja
             push!(tablas, tabla)
@@ -518,7 +530,13 @@ function julia_main()::Cint
 
     codigo = 0
     try
-        ejecutar_validacion(carpeta)
+        if !isdir(carpeta)
+            mkpath(carpeta)
+            println("No encontré la carpeta \"documentos\" junto al programa, así que la creé.")
+            println("Poné ahí las actas (PDF) y la(s) planilla(s) de notas (Excel), y volvé a ejecutar el programa.")
+        else
+            ejecutar_validacion(carpeta)
+        end
     catch e
         showerror(stderr, e, catch_backtrace())
         println(stderr)

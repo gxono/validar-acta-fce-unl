@@ -14,60 +14,73 @@ export ejecutar_validacion, julia_main
 # que rompe la extracción de texto con un `SystemError: ...Helvetica.afm`.
 # Como workaround, embebemos una copia de esos archivos (en `pdfio_fonts/`, vendored
 # desde PDFIO) como datos leídos en tiempo de compilación (no como rutas), y
-# reemplazamos `read_afm` para que los use en vez de leer del disco en tiempo de
-# ejecución. El resto de la función es una copia fiel de la original.
+# reemplazamos `read_afm` para que los use en vez de leer del disco.
+#
+# El reemplazo se hace con `eval` sobre el módulo `PDFIO.PD`, algo que Julia prohíbe
+# durante la PRECOMPILACIÓN de un paquete ("Evaluation into the closed module ...
+# breaks incremental compilation"), que es justo lo que hace PackageCompiler al
+# generar el sysimage. Por eso el parche no se aplica al cargar este módulo, sino
+# recién en tiempo de ejecución real, la primera vez que se llama a
+# `ejecutar_validacion` (ver `_parchear_pdfio_afm` más abajo).
 const _RUTA_FUENTES_AFM = joinpath(@__DIR__, "pdfio_fonts")
 
 const _DATOS_AFM = Dict{String,String}(
     splitext(archivo)[1] => read(joinpath(_RUTA_FUENTES_AFM, archivo), String)
     for archivo in readdir(_RUTA_FUENTES_AFM) if endswith(archivo, ".afm"))
 
-Core.eval(PDFIO.PD, quote
-    function read_afm(fontname::AbstractString)
-        d_name_w = Dict{CosName,Int}()
-        d_cid_w = Dict{Int,Int}()
-        lines = collect(eachline(IOBuffer($_DATOS_AFM[fontname])))
-        bStartCharMetrics = false
-        bReadKernPairs = false
-        nMetrics = 0
-        nLineRead = 0
-        afm = AdobeFontMetrics()
-        next = iterate(lines)
-        while next !== nothing
-            (line, state) = next
-            if startswith(line, "ItalicAngle")
-                v = split(line)
-                afm.italicAngle = parse(Float32, v[2])
-            elseif startswith(line, "IsFixedPitch")
-                v = split(line)
-                afm.isFixedPitch = parse(Bool, v[2])
-            elseif startswith(line, "FontName")
-                v = split(line)
-                afm.fontname = CosName(v[2])
-            elseif startswith(line, "Weight")
-                v = split(line)
-                afm.weight = Symbol(v[2])
-            else
-                bStartCharMetrics = startswith(line, "StartCharMetrics")
-                bReadKernPairs = startswith(line, "StartKernPairs")
-                if bStartCharMetrics || bReadKernPairs
+const _PDFIO_PARCHEADO = Ref(false)
+
+function _parchear_pdfio_afm()
+    _PDFIO_PARCHEADO[] && return
+    _PDFIO_PARCHEADO[] = true
+
+    Core.eval(PDFIO.PD, quote
+        function read_afm(fontname::AbstractString)
+            d_name_w = Dict{CosName,Int}()
+            d_cid_w = Dict{Int,Int}()
+            lines = collect(eachline(IOBuffer($_DATOS_AFM[fontname])))
+            bStartCharMetrics = false
+            bReadKernPairs = false
+            nMetrics = 0
+            nLineRead = 0
+            afm = AdobeFontMetrics()
+            next = iterate(lines)
+            while next !== nothing
+                (line, state) = next
+                if startswith(line, "ItalicAngle")
                     v = split(line)
-                    n = parse(Int, v[2])
-                    if bStartCharMetrics
-                        populate_char_metrics(lines, state, afm, n)
-                        bStartCharMetrics = false
-                    end
-                    if bReadKernPairs
-                        populate_kern_pairs(lines, state, afm, n)
-                        bReadKernPairs = false
+                    afm.italicAngle = parse(Float32, v[2])
+                elseif startswith(line, "IsFixedPitch")
+                    v = split(line)
+                    afm.isFixedPitch = parse(Bool, v[2])
+                elseif startswith(line, "FontName")
+                    v = split(line)
+                    afm.fontname = CosName(v[2])
+                elseif startswith(line, "Weight")
+                    v = split(line)
+                    afm.weight = Symbol(v[2])
+                else
+                    bStartCharMetrics = startswith(line, "StartCharMetrics")
+                    bReadKernPairs = startswith(line, "StartKernPairs")
+                    if bStartCharMetrics || bReadKernPairs
+                        v = split(line)
+                        n = parse(Int, v[2])
+                        if bStartCharMetrics
+                            populate_char_metrics(lines, state, afm, n)
+                            bStartCharMetrics = false
+                        end
+                        if bReadKernPairs
+                            populate_kern_pairs(lines, state, afm, n)
+                            bReadKernPairs = false
+                        end
                     end
                 end
+                next = iterate(lines, state)
             end
-            next = iterate(lines, state)
+            return afm
         end
-        return afm
-    end
-end)
+    end)
+end
 
 
 const PATRON_LINEA_ESTUDIANTE = r"""
@@ -464,6 +477,8 @@ function ejecutar_validacion(carpeta::AbstractString)
     if !isdir(carpeta)
         error("No existe la carpeta \"$carpeta\".")
     end
+
+    _parchear_pdfio_afm()
 
     datos_actas, resumen_actas = procesar_actas(carpeta)
     imprimir_resumen_actas(resumen_actas)

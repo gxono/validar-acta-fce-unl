@@ -312,7 +312,10 @@ function procesar_xlsx(directorio::AbstractString)
         end
     end
 
-    datos = isempty(tablas) ? DataFrame() : reduce((a, b) -> vcat(a, b, cols = :union), tablas)
+    tabla_vacia = DataFrame(
+        legajo = String[], nota = Union{Missing,Int64}[], hoja_fila = Int[],
+        hoja_archivo = String[], hoja_nombre = String[])
+    datos = isempty(tablas) ? tabla_vacia : reduce((a, b) -> vcat(a, b, cols = :union), tablas)
     return datos, resumen
 end
 
@@ -513,15 +516,22 @@ function julia_main()::Cint
     carpeta = joinpath(dirname(Base.PROGRAM_FILE), "documentos")
     isdir(carpeta) || (carpeta = joinpath(pwd(), "documentos"))
 
+    codigo = 0
     try
         ejecutar_validacion(carpeta)
     catch e
         showerror(stderr, e, catch_backtrace())
         println(stderr)
-        return 1
+        codigo = 1
     end
 
-    return 0
+    # Sin esto, al abrir el .exe con doble clic en Windows la consola se cierra
+    # apenas termina y no da tiempo a leer el resultado.
+    println()
+    print("Presione Enter para salir...")
+    readline()
+
+    return codigo
 end
 
 end # module

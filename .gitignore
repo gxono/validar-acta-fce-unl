@@ -31,4 +31,5 @@ Manifest.toml
 # Ejecutable generado por build/build_app.jl (PackageCompiler). Es un artefacto
 # regenerable de ~1 GB, no código fuente: no corresponde versionarlo, y varios de
 # sus archivos superan el límite de 100 MB por archivo de GitHub.
+/build/*.zip
 /build/ValidarActaApp/

@@ -71,6 +71,31 @@ distingue uno de otro por la extensión de archivo.
     └── build_app.jl                Script que genera el ejecutable standalone
 ```
 
+## Descargar y usar el ejecutable ya compilado (sin instalar Julia)
+
+Si no vas a modificar el código, no hace falta instalar Julia ni compilar nada: se
+puede usar el ejecutable ya armado, publicado en la sección
+[Releases](../../releases) del repositorio.
+
+1. Entrá a [Releases](../../releases) y descargá el `.zip` de la versión más reciente
+   (por ejemplo `validar_acta-v0.1.0-windows-x64.zip`).
+2. Descomprimilo donde quieras. Vas a obtener una carpeta `ValidarActaApp/` con esta
+   estructura:
+
+   ```
+   ValidarActaApp/
+   └── bin/
+       ├── validar_acta.exe
+       └── (varias .dll — no las borres, las necesita el ejecutable)
+   ```
+
+3. Dentro de `ValidarActaApp/bin/`, creá una carpeta llamada `documentos` y poné ahí
+   los PDF (actas) y Excel (planillas de notas) que querés validar.
+4. Ejecutá `validar_acta.exe` (doble clic, o desde una terminal parado en esa
+   carpeta). El resultado de la validación se imprime en la consola.
+
+> **Nota:** actualmente el ejecutable solo está compilado para Windows x64.
+
 ## Compilar como ejecutable standalone
 
 El proyecto está preparado para compilarse con

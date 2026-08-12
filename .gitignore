@@ -33,3 +33,7 @@ Manifest.toml
 # sus archivos superan el límite de 100 MB por archivo de GitHub.
 /build/*.zip
 /build/ValidarActaApp/
+
+# Carpetas de prueba con archivos reales (copiados a mano al testear), nunca datos
+# de ejemplo versionados.
+/build/test_*/

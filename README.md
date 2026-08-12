@@ -5,6 +5,123 @@ contra las notas que los docentes tienen cargadas en una **planilla Excel**, y r
 cualquier discrepancia (legajos faltantes, notas que no coinciden, ausentes con nota
 cargada por error, etc.).
 
+## Guía rápida: cómo descargar y usar el programa
+
+No hace falta instalar nada ni saber programar. Estos pasos son para **Windows**.
+
+### Paso 1: Descargar el programa
+
+1. Entrá a esta página: [Releases](../../releases).
+2. Ahí arriba de todo vas a ver la versión más reciente.
+3. Un poco más abajo, esa página tiene una lista que dice **"Assets"**. Hacé clic en
+   el archivo que termina en `.zip` (algo como
+   `validar_acta-v0.1.2-windows-x64.zip`). Se va a descargar a tu computadora
+   (normalmente termina en la carpeta "Descargas").
+
+### Paso 2: Descomprimir el archivo descargado
+
+1. Andá a la carpeta donde se descargó (por lo general, "Descargas").
+2. Hacé **clic derecho** sobre el archivo `.zip` que bajaste.
+3. En el menú que aparece, elegí **"Extraer todo..."**.
+4. Elegí una carpeta donde guardarlo (por ejemplo, el Escritorio) y confirmá.
+
+Esto va a crear una carpeta llamada `ValidarActaApp`. Adentro hay otra carpeta
+llamada `bin`, y adentro de esa está el programa: un archivo llamado
+`validar_acta.exe`, acompañado de varios archivos más con terminación `.dll`.
+
+> **Importante:** no muevas ni borres ningún archivo de adentro de la carpeta `bin`
+> por separado. El programa necesita que todos esos archivos estén juntos para
+> funcionar. Si en algún momento querés cambiar el programa de lugar, movés la
+> carpeta `ValidarActaApp` **entera**, no solo el `.exe`.
+
+### Paso 3: Poner las actas y las planillas de notas
+
+1. Entrá a la carpeta `ValidarActaApp` → `bin`.
+2. Hacé **doble clic** en `validar_acta.exe` para abrirlo por primera vez.
+3. Se va a abrir una ventana con fondo negro y letras blancas. Es normal, ahí es
+   donde el programa te va a ir contando qué está haciendo. Como todavía no hay
+   nada para validar, el programa va a crear solo una carpeta nueva llamada
+   `documentos` en ese mismo lugar, y te va a avisar con un mensaje parecido a este:
+
+   ```
+   No encontré la carpeta "documentos" junto al programa, así que la creé.
+   Poné ahí las actas (PDF) y la(s) planilla(s) de notas (Excel), y volvé a ejecutar el programa.
+   ```
+
+4. Apretá la tecla **Enter** para cerrar esa ventana.
+5. Ahora, al lado de `validar_acta.exe`, va a haber una carpeta nueva llamada
+   `documentos`. Entrá a esa carpeta.
+6. Copiá y pegá ahí adentro:
+   - Las **actas** en PDF que querés validar (los archivos que terminan en `.pdf`).
+   - La planilla (o planillas) de **notas** en Excel que querés comparar contra esas
+     actas (los archivos que terminan en `.xlsx`). Esa planilla tiene que cumplir:
+     - Tener, como mínimo, una columna que diga "legajo" y otra que diga "nota". No
+       importa si están en mayúsculas, minúsculas, ni en qué orden aparecen.
+     - El encabezado ("legajo", "nota", etc.) tiene que estar en la **primera fila**
+       de la hoja, sin ningún título ni fila vacía arriba.
+     - No puede haber **filas en blanco** entre los datos (por ejemplo, una fila
+       vacía "separadora" entre el encabezado y el primer estudiante). Si hay una,
+       la hoja se va a leer incompleta o vacía, sin avisar.
+
+No hace falta ordenar nada en subcarpetas ni ponerle nombres especiales a los
+archivos: el programa distingue solo cuáles son actas y cuáles son planillas, por la
+terminación del nombre del archivo (`.pdf` o `.xlsx`).
+
+#### Ejemplos de encabezados válidos e inválidos
+
+**Válido:** "legajo" y "nota" en la primera fila, nada más.
+
+| legajo | nota |
+|---|---|
+| 44312 | 8 |
+| 45123 | 6 |
+
+**También válido:** no importan las mayúsculas, el orden, ni que haya columnas de
+más (acá hay columnas que la herramienta ni siquiera mira).
+
+| Nombre | Legajo | Email | Nota |
+|---|---|---|---|
+| Pérez, Ana | 44312 | ana@mail.com | 8 |
+| Gómez, Luis | 45123 | luis@mail.com | 6 |
+
+**Inválido:** el encabezado no está en la primera fila (hay un título arriba).
+
+| Listado de notas - Materia X | |
+|---|---|
+| legajo | nota |
+| 44312 | 8 |
+
+**Inválido:** hay una fila en blanco en el medio de los datos.
+
+| legajo | nota |
+|---|---|
+| 44312 | 8 |
+| *(fila vacía)* | |
+| 45123 | 6 |
+
+### Paso 4: Validar
+
+1. Volvé a hacer doble clic en `validar_acta.exe`.
+2. Se abre de nuevo la ventana negra. Ahí vas a ver, en este orden:
+   - Un resumen de qué archivos encontró: cuántas actas leyó, cuántas páginas tenía
+     cada una, y cuántos estudiantes sacó de cada planilla. Sirve para confirmar de
+     un vistazo que no se le pasó por alto ningún archivo.
+   - La lista de problemas que encontró al comparar las actas con las planillas (por
+     ejemplo, un estudiante que está en el acta pero no en la planilla, o una nota
+     que no coincide). Más abajo, en [Qué hace](#qué-hace), está el detalle de qué
+     significa cada tipo de problema. Si no encuentra ningún problema, te lo va a
+     decir también.
+3. Leé con calma el resultado (si es muy largo, podés desplazarte hacia arriba con la
+   rueda del mouse o la barra de scroll de la ventana).
+4. Cuando termines de leerlo, apretá **Enter** para cerrar la ventana.
+
+### Paso 5: Repetir cada vez que haga falta
+
+Podés correr el programa las veces que quieras. Si agregás una planilla nueva,
+corregís un archivo, o sumás más actas dentro de la carpeta `documentos`, simplemente
+volvé a hacer doble clic en `validar_acta.exe` y va a validar todo de nuevo con lo
+que haya en ese momento.
+
 ## Qué hace
 
 La carpeta `documentos/` tiene que tener dos tipos de archivo: las **actas oficiales**
@@ -35,7 +152,17 @@ distingue uno de otro por la extensión de archivo.
    capturados por acta; hojas incluidas/omitidas y estudiantes por cada una), para
    detectar de entrada si algún archivo quedó afuera sin que sea evidente por qué.
 
-## Requisitos
+---
+
+Lo que sigue de acá para abajo **no hace falta leerlo para usar el programa**. Es
+solo para quien quiera meterse en el código, correrlo desde Julia en vez del
+ejecutable, o compilar su propia versión del `.exe`.
+
+## Requisitos para compilarlo vos mismo
+
+Estos requisitos **no aplican si solo vas a usar el programa ya compilado** (la guía
+del principio de este documento). Son necesarios únicamente si vas a modificar el
+código fuente o generar tu propia versión del ejecutable desde cero.
 
 - [Julia](https://julialang.org/) 1.10 o superior (probado con 1.12).
 
@@ -71,31 +198,6 @@ distingue uno de otro por la extensión de archivo.
     └── build_app.jl                Script que genera el ejecutable standalone
 ```
 
-## Descargar y usar el ejecutable ya compilado (sin instalar Julia)
-
-Si no vas a modificar el código, no hace falta instalar Julia ni compilar nada: se
-puede usar el ejecutable ya armado, publicado en la sección
-[Releases](../../releases) del repositorio.
-
-1. Entrá a [Releases](../../releases) y descargá el `.zip` de la versión más reciente
-   (por ejemplo `validar_acta-v0.1.0-windows-x64.zip`).
-2. Descomprimilo donde quieras. Vas a obtener una carpeta `ValidarActaApp/` con esta
-   estructura:
-
-   ```
-   ValidarActaApp/
-   └── bin/
-       ├── validar_acta.exe
-       └── (varias .dll — no las borres, las necesita el ejecutable)
-   ```
-
-3. Dentro de `ValidarActaApp/bin/`, creá una carpeta llamada `documentos` y poné ahí
-   los PDF (actas) y Excel (planillas de notas) que querés validar.
-4. Ejecutá `validar_acta.exe` (doble clic, o desde una terminal parado en esa
-   carpeta). El resultado de la validación se imprime en la consola.
-
-> **Nota:** actualmente el ejecutable solo está compilado para Windows x64.
-
 ## Compilar como ejecutable standalone
 
 El proyecto está preparado para compilarse con
@@ -115,7 +217,7 @@ build/ValidarActaApp/bin/validar_acta.exe
 ```
 
 Antes de correrlo, copiá la carpeta `documentos/` (con los PDF y Excel a validar)
-junto al ejecutable, en `build/ValidarActaApp/bin/documentos/` — la app siempre busca
+junto al ejecutable, en `build/ValidarActaApp/bin/documentos/`. La app siempre busca
 una carpeta con ese nombre al lado suyo.
 
 ### Nota técnica: por qué existe `src/pdfio_fonts/`
@@ -134,4 +236,4 @@ aplica en tiempo de ejecución real (no al cargar el módulo), porque Julia proh
 
 ## Licencia
 
-MIT — ver [LICENSE](LICENSE).
+MIT. Ver [LICENSE](LICENSE).

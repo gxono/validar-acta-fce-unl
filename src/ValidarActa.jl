@@ -174,6 +174,13 @@ function _procesar_pdf(tabla_vacia, buffer, carpeta_actas, nombre_pdf)
 
             texto = String(take!(buffer))
 
+            # Algunas actas traen una "Hoja de firmas" al final (sin número de acta,
+            # facultad, carrera ni estudiantes): se cuenta como página del PDF pero no
+            # se procesa como si tuviera datos.
+            if occursin(r"hoja\s+de\s+firmas"i, texto)
+                continue
+            end
+
             m = match(PATRON_NUMERO_ACTA, texto)
             isnothing(m) ? error("No se encontró número de acta ($(nombre_pdf): pag $npage)") : (acta_numero = m[:nacta])
             m = match(PATRON_FACULTAD, texto)
@@ -296,15 +303,23 @@ function procesar_xlsx(directorio::AbstractString)
 
     for archivo in archivos
         ruta = joinpath(directorio, archivo)
-        nombres_hojas = XLSX.openxlsx(xf -> XLSX.sheetnames(xf), ruta)
 
-        for nombre_hoja in nombres_hojas
-            tabla = XLSX.readto(ruta, nombre_hoja, DataFrame)
+        for nombre_hoja in XLSX.openxlsx(xf -> XLSX.sheetnames(xf), ruta)
+            # Sin un rango de columnas explícito, XLSX.jl busca solo la primera racha
+            # de celdas de encabezado consecutivas sin huecos, y corta ahí (aunque
+            # haya más columnas con datos después de una celda vacía). "A:CZ" fuerza
+            # a leer un rango amplio y evita ese corte prematuro.
+            #
+            # El encabezado (fila con "legajo" y "nota") tiene que ser la primera fila
+            # de la hoja, y no puede haber filas en blanco entre los datos: XLSX.jl
+            # deja de leer apenas encuentra la primera fila vacía.
+            tabla = XLSX.readto(ruta, nombre_hoja, "A:CZ", DataFrame)
             tabla = rename(col -> lowercase(strip(string(col))), tabla)
 
             if !all(in(propertynames(tabla)), (:legajo, :nota))
+                columnas_reales = filter(c -> !startswith(c, "#empty"), lowercase.(names(tabla)))
                 push!(resumen, (; archivo, hoja = nombre_hoja, incluida = false, estudiantes = 0,
-                    motivo = "no tiene columnas \"legajo\" y \"nota\" (columnas encontradas: $(join(names(tabla), ", ")))"))
+                    motivo = "no tiene columnas \"legajo\" y \"nota\" (columnas encontradas: $(join(columnas_reales, ", ")))"))
                 continue
             end
 
@@ -363,9 +378,16 @@ end
 """
 Normaliza un legajo a `String` en minúsculas y sin espacios, para que el join no
 falle por diferencias de tipo (Int64 vs String), mayúsculas/minúsculas, o espacios
-en blanco entre el PDF y el Excel.
+en blanco entre el PDF y el Excel. Los legajos puramente numéricos a veces quedan
+cargados en Excel como número (`44312.0`) en vez de texto: sin este ajuste,
+`string(44312.0)` da `"44312.0"` y nunca empareja con el `"44312"` del acta.
 """
-_normalizar_legajo(legajo) = lowercase(strip(string(legajo)))
+function _normalizar_legajo(legajo)
+    if legajo isa AbstractFloat && isinteger(legajo)
+        return lowercase(strip(string(Int(legajo))))
+    end
+    return lowercase(strip(string(legajo)))
+end
 
 
 """

@@ -5,23 +5,13 @@ using PDFIO, DataFrames, XLSX
 export ejecutar_validacion, julia_main
 
 
-# --- Parche a PDFIO para que funcione en un ejecutable compilado con PackageCompiler ---
-#
-# `PDFIO.PD.read_afm` ubica sus archivos de métricas de fuente (.afm) con una ruta
-# calculada con `@__DIR__` en tiempo de compilación (ver PDFontMetrics.jl de PDFIO).
-# Al compilar esta app con PackageCompiler, esa ruta queda fija al `.julia` de la
-# máquina donde se compiló y no existe en la máquina donde corre el ejecutable, lo
-# que rompe la extracción de texto con un `SystemError: ...Helvetica.afm`.
-# Como workaround, embebemos una copia de esos archivos (en `pdfio_fonts/`, vendored
-# desde PDFIO) como datos leídos en tiempo de compilación (no como rutas), y
-# reemplazamos `read_afm` para que los use en vez de leer del disco.
-#
-# El reemplazo se hace con `eval` sobre el módulo `PDFIO.PD`, algo que Julia prohíbe
-# durante la PRECOMPILACIÓN de un paquete ("Evaluation into the closed module ...
-# breaks incremental compilation"), que es justo lo que hace PackageCompiler al
-# generar el sysimage. Por eso el parche no se aplica al cargar este módulo, sino
-# recién en tiempo de ejecución real, la primera vez que se llama a
-# `ejecutar_validacion` (ver `_parchear_pdfio_afm` más abajo).
+# PDFIO.PD.read_afm ubica sus .afm con una ruta absoluta calculada en tiempo de
+# compilación, que queda rota en un ejecutable compilado (SystemError:
+# ...Helvetica.afm). Acá los embebemos como datos y reemplazamos read_afm para que
+# los use. El reemplazo (eval sobre PDFIO.PD) no puede hacerse al cargar este
+# módulo porque Julia lo prohíbe durante la precompilación de un paquete; por eso
+# se aplica recién en tiempo de ejecución, la primera vez que se llama a
+# ejecutar_validacion.
 const _RUTA_FUENTES_AFM = joinpath(@__DIR__, "pdfio_fonts")
 
 const _DATOS_AFM = Dict{String,String}(
@@ -88,15 +78,15 @@ const PATRON_LINEA_ESTUDIANTE = r"""
     (?<n>\d{1,2})\s+
     (?<legajo>[\w\d\-]+\d)\s*
     (?<nombre>[\w\s,´'\-]+)\s{2,}
-    (?<documento>.*)\s*
-    (?<fecha>\d{2}/\d{2}/\d{4})\s*
-    (?<condicion>[\w\s])\s{2}
+    (?:.*)\s*
+    (?:\d{2}/\d{2}/\d{4})\s*
+    (?:[\w\s])\s{2}
     (?:
         (?<ausente>Ausente)
         |
         (?<nota>\d{1,2})\s
-        \((?<nota_texto>\w+)\)\s
-        (?<calificacion>\S.*\S|\S)
+        \((?:\w+)\)\s
+        (?:\S.*\S|\S)
     )
     \s*$
 """x
@@ -114,13 +104,6 @@ const PATRON_LINEA_FRECUENCIAS = r"""
     (?<parcial_insuficiente>\d+)\s*
     (?<parcial_total>\d+)
     """x
-
-const PATRON_NUMERO_ACTA = r"Acta de Exámenes Número:\s*(?<nacta>\S+)\s+"
-
-const PATRON_FACULTAD = r"Facultad:\s*(?<facultad>[\w\s]+)\s{2,}"
-
-const PATRON_CARRERA = r"Carrera:\s*(?<carrera>[\w\s]+?)(?:ES\sCOPIA|\s{2,})"
-
 
 function _error_captura_estudiantes_cantidad_diferente(df, m, page, file)
     if isnothing(m)
@@ -141,20 +124,12 @@ end
 function _tabla_vacia()
     DataFrame(
         :acta_archivo => String[],
-        :facultad => String[],
-        :acta_numero => String[],
         :acta_npagina => Int[],
         :acta_nfila => Int[],
         :legajo => String[],
         :nombre => String[],
-        :carrera => String[],
-        :documento => String[],
-        :fecha => String[],
         :presente => Bool[],
-        :condicion => String[],
-        :nota => Union{Int64,Missing}[],
-        :nota_texto => Union{String,Missing}[],
-        :calificacion => Union{String,Missing}[])
+        :nota => Union{Int64,Missing}[])
 end
 
 
@@ -174,19 +149,11 @@ function _procesar_pdf(tabla_vacia, buffer, carpeta_actas, nombre_pdf)
 
             texto = String(take!(buffer))
 
-            # Algunas actas traen una "Hoja de firmas" al final (sin número de acta,
-            # facultad, carrera ni estudiantes): se cuenta como página del PDF pero no
-            # se procesa como si tuviera datos.
+            # Algunas actas traen una "Hoja de firmas" al final (sin estudiantes):
+            # se cuenta como página del PDF pero no se procesa como si tuviera datos.
             if occursin(r"hoja\s+de\s+firmas"i, texto)
                 continue
             end
-
-            m = match(PATRON_NUMERO_ACTA, texto)
-            isnothing(m) ? error("No se encontró número de acta ($(nombre_pdf): pag $npage)") : (acta_numero = m[:nacta])
-            m = match(PATRON_FACULTAD, texto)
-            isnothing(m) ? error("No se encontró nombre de facultad ($(nombre_pdf): pag $npage)") : (facultad = m[:facultad])
-            m = match(PATRON_CARRERA, texto)
-            isnothing(m) ? error("No se encontró carrera ($(nombre_pdf): pag $npage)") : (carrera = m[:carrera])
 
             resumen_frecuencia_pie = match(PATRON_LINEA_FRECUENCIAS, texto)
             _error_captura_resumen_pie(resumen_frecuencia_pie, npage, nombre_pdf)
@@ -194,31 +161,21 @@ function _procesar_pdf(tabla_vacia, buffer, carpeta_actas, nombre_pdf)
             for linea in split(texto, "\n")
                 linea_estudiante = match(PATRON_LINEA_ESTUDIANTE, linea)
                 if !isnothing(linea_estudiante)
-
-                    # Diferenciar si estudiante estuvo ausente o no.
                     if !isnothing(linea_estudiante[:ausente])
                         nota = missing
-                        nota_texto = missing
-                        calificacion = missing
                         presente = false
                     else
                         nota = parse(Int64, linea_estudiante[:nota])
-                        nota_texto = linea_estudiante[:nota_texto]
-                        calificacion = linea_estudiante[:calificacion]
                         presente = true
                     end
 
                     push!(estudiantes_parcial, (;
-                        facultad, acta_numero, carrera,
                         acta_nfila = parse(Int, linea_estudiante[:n]),
                         acta_npagina = npage,
                         acta_archivo = nombre_pdf,
                         legajo = linea_estudiante[:legajo],
                         nombre = linea_estudiante[:nombre],
-                        documento = linea_estudiante[:documento],
-                        fecha = linea_estudiante[:fecha],
-                        condicion = linea_estudiante[:condicion],
-                        presente, nota, nota_texto, calificacion))
+                        presente, nota))
                 end
             end
 
@@ -234,11 +191,6 @@ function _procesar_pdf(tabla_vacia, buffer, carpeta_actas, nombre_pdf)
 end
 
 
-"""
-Lee todos los PDF de `carpeta_actas`. Devuelve una tupla `(estudiantes, resumen)`,
-donde `resumen` tiene una fila por acta con la cantidad de páginas y de
-estudiantes capturados, para poder verificar de un vistazo que se leyó todo.
-"""
 function procesar_actas(carpeta_actas::AbstractString)
     lista_pdf = filter(f -> endswith(lowercase(f), ".pdf"), readdir(carpeta_actas))
 
@@ -257,17 +209,12 @@ function procesar_actas(carpeta_actas::AbstractString)
         estudiantes_total, paginas = _procesar_pdf(tabla_vacia, buffer, carpeta_actas, nombre_pdf)
         tabla_estudiantes = vcat(tabla_estudiantes, estudiantes_total)
         push!(resumen, (archivo = nombre_pdf, paginas = paginas, estudiantes = nrow(estudiantes_total)))
-        println("Listo $nombre_pdf")
     end
 
     return tabla_estudiantes, resumen
 end
 
 
-"""
-Imprime el resumen de lectura de actas (PDF): cuántas páginas y estudiantes se
-capturaron por archivo, para poder chequear a simple vista que ninguna quedó afuera.
-"""
 function imprimir_resumen_actas(resumen::AbstractDataFrame)
     println()
     println("=== Actas leídas (PDF) ===")
@@ -283,17 +230,10 @@ function imprimir_resumen_actas(resumen::AbstractDataFrame)
 end
 
 
-"""
-Lee todas las hojas de todos los `.xlsx` de `directorio`. Devuelve una tupla
-`(estudiantes, resumen)`, donde `resumen` tiene una fila por cada hoja de cada
-libro, indicando si se incluyó (tenía columnas "legajo" y "nota") o no y por qué.
-"""
 function procesar_xlsx(directorio::AbstractString)
     todos_archivos = readdir(directorio)
     archivos = filter(contains(r"^[^~].*\.xlsx$"i), todos_archivos)
 
-    # Archivos que parecen planillas de Excel pero en un formato que no leemos
-    # (solo soportamos .xlsx): avisar en vez de ignorarlos en silencio.
     for archivo in filter(contains(r"^[^~].*\.(xls|xlsm)$"i), todos_archivos)
         @warn "El archivo \"$archivo\" no se puede leer (solo se soporta .xlsx). Convertilo a .xlsx y volvé a intentar."
     end
@@ -305,31 +245,21 @@ function procesar_xlsx(directorio::AbstractString)
         ruta = joinpath(directorio, archivo)
 
         for nombre_hoja in XLSX.openxlsx(xf -> XLSX.sheetnames(xf), ruta)
-            # Sin un rango de columnas explícito, XLSX.jl busca solo la primera racha
-            # de celdas de encabezado consecutivas sin huecos, y corta ahí (aunque
-            # haya más columnas con datos después de una celda vacía). "A:CZ" fuerza
-            # a leer un rango amplio y evita ese corte prematuro.
-            #
-            # El encabezado (fila con "legajo" y "nota") tiene que ser la primera fila
-            # de la hoja, y no puede haber filas en blanco entre los datos: XLSX.jl
-            # deja de leer apenas encuentra la primera fila vacía.
+            # Sin rango de columnas explícito, XLSX.jl corta en la primera celda de
+            # encabezado vacía; "A:CZ" evita ese corte. El encabezado tiene que estar
+            # en la fila 1 y sin filas en blanco entre los datos (XLSX.jl corta ahí también).
             tabla = XLSX.readto(ruta, nombre_hoja, "A:CZ", DataFrame)
             tabla = rename(col -> lowercase(strip(string(col))), tabla)
 
             if !all(in(propertynames(tabla)), (:legajo, :nota))
                 columnas_reales = filter(c -> !startswith(c, "#empty"), lowercase.(names(tabla)))
                 push!(resumen, (; archivo, hoja = nombre_hoja, incluida = false, estudiantes = 0,
-                    motivo = "no tiene columnas \"legajo\" y \"nota\" (columnas encontradas: $(join(columnas_reales, ", ")))"))
+                    motivo = join(columnas_reales, ", ")))
                 continue
             end
 
-            # La fila 1 es el encabezado, así que la fila de Excel de cada dato es su índice + 1.
             tabla.hoja_fila = axes(tabla, 1) .+ 1
-
             tabla = select(tabla, :legajo, :nota, :hoja_fila)
-
-            # Excel suele "extender" el rango de la hoja más allá de los datos reales:
-            # descartamos filas en blanco (sin legajo) para no tratarlas como estudiantes.
             tabla = tabla[.!ismissing.(tabla.legajo) .& (strip.(string.(tabla.legajo)) .!= ""), :]
 
             tabla.hoja_archivo .= archivo
@@ -347,12 +277,6 @@ function procesar_xlsx(directorio::AbstractString)
 end
 
 
-"""
-Imprime el resumen de lectura de hojas de notas (Excel): por cada libro, cuántas
-hojas tiene, cuáles se incluyeron (tenían "legajo" y "nota") y cuántos estudiantes
-aportó cada una, para poder chequear a simple vista que no quedó ninguna afuera
-por error.
-"""
 function imprimir_resumen_hojas(resumen::AbstractDataFrame)
     println()
     println("=== Hojas de notas leídas (Excel) ===")
@@ -368,20 +292,17 @@ function imprimir_resumen_hojas(resumen::AbstractDataFrame)
             if r.incluida
                 println("    · \"$(r.hoja)\": $(r.estudiantes) estudiante(s)")
             else
-                println("    · \"$(r.hoja)\": omitida ($(r.motivo))")
+                println("    · \"$(r.hoja)\": omitida, no tiene columnas \"legajo\" y \"nota\"")
+                println("        columnas encontradas: $(r.motivo)")
             end
         end
     end
 end
 
 
-"""
-Normaliza un legajo a `String` en minúsculas y sin espacios, para que el join no
-falle por diferencias de tipo (Int64 vs String), mayúsculas/minúsculas, o espacios
-en blanco entre el PDF y el Excel. Los legajos puramente numéricos a veces quedan
-cargados en Excel como número (`44312.0`) en vez de texto: sin este ajuste,
-`string(44312.0)` da `"44312.0"` y nunca empareja con el `"44312"` del acta.
-"""
+# Legajos numéricos a veces quedan cargados en Excel como número (44312.0) en vez
+# de texto; sin el chequeo de Int, string(44312.0) da "44312.0" y no empareja con
+# el "44312" del acta.
 function _normalizar_legajo(legajo)
     if legajo isa AbstractFloat && isinteger(legajo)
         return lowercase(strip(string(Int(legajo))))
@@ -390,11 +311,7 @@ function _normalizar_legajo(legajo)
 end
 
 
-"""
-Avisa si hay legajos repetidos en `df`, ya que un legajo duplicado hace que el
-outerjoin genere un producto cartesiano (cada fila se cruza con todas las que
-matchean) y ensucia el reporte sin avisar.
-"""
+# Un legajo duplicado hace que el outerjoin genere un producto cartesiano.
 function _advertir_legajos_duplicados(df::AbstractDataFrame, origen::AbstractString)
     duplicados = unique(df.legajo[nonunique(df, :legajo)])
     if !isempty(duplicados)
@@ -403,11 +320,8 @@ function _advertir_legajos_duplicados(df::AbstractDataFrame, origen::AbstractStr
 end
 
 
-"""
-Devuelve el primer valor no-`missing` de `row` entre las columnas de `cols` que
-existan (sirve para leer, p. ej., `:nombre_acta` o `:nombre` según si la columna
-quedó sufijada o no tras el join).
-"""
+# El outerjoin sufija con "_acta"/"_hoja" TODAS las columnas de cada lado (no solo
+# las que chocan de nombre), así que hay que probar ambas formas.
 function _primero_no_missing(row, cols)
     for c in cols
         if hasproperty(row, c)
@@ -419,16 +333,6 @@ function _primero_no_missing(row, cols)
 end
 
 
-"""
-Recorre el resultado del outerjoin acta/hoja y arma un DataFrame con una fila
-por cada incidencia detectada:
-- `falta_en_acta` / `falta_en_hoja`: el legajo no aparece de un lado.
-- `ausente_con_nota_en_hoja`: el acta marca al estudiante ausente pero la hoja
-  tiene un valor numérico cargado (no se asume cuál está mal, solo se avisa).
-- `falta_nota_en_hoja`: el estudiante rindió (según el acta) pero la hoja no
-  tiene nota cargada.
-- `nota_no_coincide`: ambas fuentes tienen nota pero difieren.
-"""
 function detectar_incidencias(df::AbstractDataFrame, legajos_acta::Set, legajos_hoja::Set)
     incidencias = DataFrame(
         legajo = String[], nombre = Union{Missing,String}[],
@@ -447,9 +351,9 @@ function detectar_incidencias(df::AbstractDataFrame, legajos_acta::Set, legajos_
         acta_archivo = _primero_no_missing(r, (:acta_archivo_acta, :acta_archivo))
         acta_npagina = _primero_no_missing(r, (:acta_npagina_acta, :acta_npagina))
         acta_nfila = _primero_no_missing(r, (:acta_nfila_acta, :acta_nfila))
-        hoja_archivo = hasproperty(r, :hoja_archivo) ? r.hoja_archivo : missing
-        hoja_nombre = hasproperty(r, :hoja_nombre) ? r.hoja_nombre : missing
-        hoja_fila = hasproperty(r, :hoja_fila) ? r.hoja_fila : missing
+        hoja_archivo = _primero_no_missing(r, (:hoja_archivo_hoja, :hoja_archivo))
+        hoja_nombre = _primero_no_missing(r, (:hoja_nombre_hoja, :hoja_nombre))
+        hoja_fila = _primero_no_missing(r, (:hoja_fila_hoja, :hoja_fila))
         presente = _primero_no_missing(r, (:presente_acta, :presente))
 
         problema, detalle = if !en_acta
@@ -478,10 +382,6 @@ function detectar_incidencias(df::AbstractDataFrame, legajos_acta::Set, legajos_
 end
 
 
-"""
-Imprime `incidencias` en la consola, agrupadas por tipo de problema, con el
-detalle necesario para revisar cada caso manualmente.
-"""
 function imprimir_incidencias(incidencias::AbstractDataFrame)
     if isempty(incidencias)
         @info "No se detectaron incidencias: legajos y notas coinciden entre actas y hoja(s)."
@@ -490,9 +390,11 @@ function imprimir_incidencias(incidencias::AbstractDataFrame)
 
     for grupo in groupby(incidencias, :problema)
         println()
-        println("=== $(nrow(grupo)) incidencia(s) de tipo \"$(grupo.problema[1])\" ===")
-        for r in eachrow(grupo)
-            println("-"^60)
+        println("="^60)
+        println("$(nrow(grupo)) incidencia(s) de tipo \"$(grupo.problema[1])\"")
+        println("="^60)
+        for (i, r) in enumerate(eachrow(grupo))
+            i == 1 || println("-"^60)
             println("Legajo: $(r.legajo)")
             ismissing(r.nombre) || println("Nombre: $(r.nombre)")
             println(r.detalle)
@@ -500,16 +402,11 @@ function imprimir_incidencias(incidencias::AbstractDataFrame)
             ismissing(r.hoja_archivo) || println("Libro: $(r.hoja_archivo), hoja \"$(r.hoja_nombre)\" (fila $(r.hoja_fila))")
         end
     end
-    println("-"^60)
+    println("="^60)
     println("Total de incidencias: $(nrow(incidencias))")
 end
 
 
-"""
-Corre el proceso completo de validación sobre `carpeta`: lee actas y hojas de
-notas, imprime sus resúmenes de lectura, las cruza por legajo y reporta las
-incidencias encontradas. Devuelve el DataFrame de incidencias.
-"""
 function ejecutar_validacion(carpeta::AbstractString)
     if !isdir(carpeta)
         error("No existe la carpeta \"$carpeta\".")
@@ -541,11 +438,6 @@ function ejecutar_validacion(carpeta::AbstractString)
 end
 
 
-"""
-Punto de entrada para el ejecutable compilado con PackageCompiler. Busca una
-carpeta "documentos" junto al ejecutable (o en el directorio actual si se corre
-desde el REPL) y corre la validación sobre ella.
-"""
 function julia_main()::Cint
     carpeta = joinpath(dirname(Base.PROGRAM_FILE), "documentos")
     isdir(carpeta) || (carpeta = joinpath(pwd(), "documentos"))
@@ -565,8 +457,6 @@ function julia_main()::Cint
         codigo = 1
     end
 
-    # Sin esto, al abrir el .exe con doble clic en Windows la consola se cierra
-    # apenas termina y no da tiempo a leer el resultado.
     println()
     print("Presione Enter para salir...")
     readline()
